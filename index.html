@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deepfake Analyzer — Talkdesk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ── Navigation ─────────────────────────────────────── -->
+  <nav class="td-nav">
+    <a class="td-nav-logo" href="https://www.talkdesk.com" target="_blank" rel="noopener">
+      <span>Talkdesk</span>
+    </a>
+    <div class="td-nav-divider"></div>
+    <span class="td-nav-title">Deepfake Analyzer</span>
+    <div class="td-nav-spacer"></div>
+  </nav>
+
+  <!-- ── Main Content ───────────────────────────────────── -->
+  <main class="td-main">
+
+    <!-- Hero -->
+    <div class="td-hero">
+      <div class="td-hero-badge">Voice Verity by ValidSoft</div>
+      <h1>Audio Deepfake Detection</h1>
+      <p>Upload an audio file or record from your microphone to analyze whether speech is genuine or AI-generated.</p>
+    </div>
+
+    <!-- Analyzer Panel -->
+    <div class="df-panel">
+      <div class="df-panel-header">
+        <div class="df-panel-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/><line x1="12" y1="19" x2="12" y2="22" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
+        </div>
+        <div class="df-panel-info">
+          <h2>Deepfake Analyzer</h2>
+          <p>Powered by ValidSoft Voice Verity</p>
+        </div>
+      </div>
+
+      <div class="df-panel-body">
+
+        <!-- ── Input Section (dropzone + record) ── -->
+        <div id="inputSection">
+          <div class="df-dropzone" id="dropzone">
+            <div class="df-dropzone-icon">
+              <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div class="df-dropzone-text">
+              Drop audio file here or <strong id="browseBtn">browse</strong>
+            </div>
+            <div class="df-dropzone-hint">WAV, MP3, OGG, WebM, M4A — up to 50 MB</div>
+            <input type="file" id="fileInput" accept="audio/*" hidden>
+          </div>
+
+          <div class="df-input-actions">
+            <span style="font-size:12px;color:var(--gray-400)">or</span>
+            <button class="df-btn df-btn-record df-btn-sm" id="recordBtn">
+              <svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6"/></svg>
+              Record
+            </button>
+          </div>
+
+          <!-- Recorder (hidden by default) -->
+          <div class="df-recorder" id="recorder" hidden>
+            <div class="df-recorder-indicator">
+              <span class="df-recorder-dot"></span>
+              Recording
+            </div>
+            <div class="df-recorder-time" id="recorderTime">0:00</div>
+            <canvas class="df-recorder-waveform" id="recorderWaveform" width="480" height="48"></canvas>
+            <div class="df-recorder-actions">
+              <button class="df-btn df-btn-primary df-btn-sm" id="stopRecordBtn">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
+                Done
+              </button>
+              <button class="df-btn df-btn-ghost df-btn-sm" id="cancelRecordBtn">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Preview Section ── -->
+        <div id="previewSection" hidden>
+          <div class="df-preview">
+            <div class="df-preview-file">
+              <div class="df-preview-icon">
+                <svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+              </div>
+              <div class="df-preview-info">
+                <div class="df-preview-name" id="previewName">—</div>
+                <div class="df-preview-meta" id="previewMeta">—</div>
+              </div>
+            </div>
+            <audio id="audioPlayer" controls></audio>
+            <div class="df-preview-actions">
+              <button class="df-btn df-btn-primary df-btn-lg" id="analyzeBtn" style="flex:1">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                Analyze
+              </button>
+              <button class="df-btn df-btn-outline" id="clearBtn">Clear</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Analyzing State ── -->
+        <div id="analyzingSection" hidden>
+          <div class="df-analyzing">
+            <div class="df-spinner"></div>
+            <div class="df-analyzing-text">Analyzing audio...</div>
+            <div class="df-analyzing-hint">This may take a few seconds depending on file size</div>
+          </div>
+        </div>
+
+        <!-- ── Results Section ── -->
+        <div id="resultsSection" hidden>
+          <div class="df-results">
+
+            <!-- Gauge -->
+            <div class="df-gauge">
+              <svg viewBox="0 0 180 180">
+                <circle class="df-gauge-bg" cx="90" cy="90" r="85"/>
+                <circle class="df-gauge-fill" id="gaugeFill" cx="90" cy="90" r="85"
+                  stroke-dasharray="534" stroke-dashoffset="534"/>
+              </svg>
+              <div class="df-gauge-label">
+                <span class="df-gauge-score" id="gaugeScore">—</span>
+                <span class="df-gauge-unit" id="gaugeUnit"></span>
+              </div>
+            </div>
+
+            <!-- Classification -->
+            <div class="df-classification">
+              <span class="df-classification-badge" id="classificationBadge">—</span>
+              <div class="df-classification-desc" id="classificationDesc"></div>
+            </div>
+
+            <!-- Details Grid -->
+            <div class="df-details-grid" id="detailsGrid"></div>
+
+            <!-- Raw JSON -->
+            <details class="df-raw-toggle">
+              <summary>View raw API response</summary>
+              <pre class="df-raw-json" id="rawJson"></pre>
+            </details>
+
+            <!-- Actions -->
+            <div class="df-results-actions">
+              <button class="df-btn df-btn-outline" id="newAnalysisBtn">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                New Analysis
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Error Section ── -->
+        <div id="errorSection" hidden>
+          <div class="df-error">
+            <div class="df-error-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </div>
+            <div class="df-error-text" id="errorText">Something went wrong</div>
+            <div class="df-error-detail" id="errorDetail"></div>
+            <button class="df-btn df-btn-outline" id="retryBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+              Try Again
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="df-history" id="historySection" hidden>
+      <div class="df-history-title">Recent Analyses</div>
+      <div class="df-history-list" id="historyList"></div>
+    </div>
+
+  </main>
+
+  <!-- ── Footer ─────────────────────────────────────────── -->
+  <footer class="td-footer">
+    &copy; 2026 Talkdesk, Inc. All rights reserved.
+  </footer>
+
+  <script src="deepfake.js"></script>
+</body>
+</html>
