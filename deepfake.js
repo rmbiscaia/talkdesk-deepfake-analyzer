@@ -406,10 +406,14 @@ class DeepfakeAnalyzer {
     for (const detail of details) {
       const card = document.createElement('div');
       card.className = 'df-detail-card';
-      card.innerHTML = `
-        <div class="df-detail-label">${detail.label}</div>
-        <div class="df-detail-value">${detail.value}</div>
-      `;
+      const labelEl = document.createElement('div');
+      labelEl.className = 'df-detail-label';
+      labelEl.textContent = detail.label;
+      const valueEl = document.createElement('div');
+      valueEl.className = 'df-detail-value';
+      valueEl.textContent = detail.value;
+      card.appendChild(labelEl);
+      card.appendChild(valueEl);
       this.detailsGrid.appendChild(card);
     }
 

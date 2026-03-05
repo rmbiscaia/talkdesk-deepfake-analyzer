@@ -115,11 +115,18 @@ function getValidSoftToken() {
 // HTTP Server
 // ---------------------------------------------------------------------------
 
+const MAX_BODY_BYTES = 50 * 1024 * 1024; // 50 MB — matches client-side limit
+
 const server = http.createServer((req, res) => {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  // Security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; img-src 'self' data:");
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -139,8 +146,23 @@ const server = http.createServer((req, res) => {
     }
 
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    let bodyBytes = 0;
+    let bodyTooLarge = false;
+    req.on('data', chunk => {
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_BODY_BYTES) {
+        if (!bodyTooLarge) {
+          bodyTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Payload too large', message: 'Maximum request size is 50 MB.' }));
+          req.resume(); // drain remaining data without storing it
+        }
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', async () => {
+      if (bodyTooLarge) return; // response already sent
       try {
         const token = await getValidSoftToken();
         const parsed = new URL(VALIDSOFT_API_URL);
@@ -196,8 +218,15 @@ const server = http.createServer((req, res) => {
   }
 
   // ── Static file serving ────────────────────────────────────────────────
-  let filePath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
-  filePath = path.join(__dirname, filePath);
+  let urlPath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+  const filePath = path.resolve(__dirname, path.join('/', urlPath).slice(1));
+
+  // Guard against path traversal — resolved path must stay within __dirname
+  if (!filePath.startsWith(__dirname + path.sep) && filePath !== __dirname) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Forbidden');
+    return;
+  }
 
   const ext = path.extname(filePath);
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
