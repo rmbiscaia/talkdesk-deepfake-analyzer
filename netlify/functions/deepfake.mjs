@@ -12,6 +12,11 @@ async function getToken() {
   }
 
   const { VALIDSOFT_AUTH_URL, VALIDSOFT_CLIENT_ID, VALIDSOFT_CLIENT_SECRET } = process.env;
+
+  if (!VALIDSOFT_AUTH_URL || !VALIDSOFT_CLIENT_ID || !VALIDSOFT_CLIENT_SECRET) {
+    throw new Error('Missing auth credentials in environment variables');
+  }
+
   const credentials = Buffer.from(`${VALIDSOFT_CLIENT_ID}:${VALIDSOFT_CLIENT_SECRET}`).toString('base64');
 
   const res = await fetch(VALIDSOFT_AUTH_URL, {
@@ -25,7 +30,7 @@ async function getToken() {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Token request failed: HTTP ${res.status} — ${text}`);
+    throw new Error(`Cognito token request failed: HTTP ${res.status} — ${text}`);
   }
 
   const data = await res.json();
@@ -38,11 +43,23 @@ async function getToken() {
 }
 
 export default async (req) => {
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('', {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
+    });
+  }
+
   // Only accept POST
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    return new Response(JSON.stringify({ error: 'Method not allowed', method: req.method }), {
       status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   }
 
@@ -52,9 +69,15 @@ export default async (req) => {
     return new Response(JSON.stringify({
       error: 'ValidSoft not configured',
       message: 'Set VALIDSOFT_API_URL, VALIDSOFT_AUTH_URL, VALIDSOFT_CLIENT_ID, and VALIDSOFT_CLIENT_SECRET in Netlify environment variables.',
+      configured: {
+        VALIDSOFT_API_URL: !!VALIDSOFT_API_URL,
+        VALIDSOFT_AUTH_URL: !!VALIDSOFT_AUTH_URL,
+        VALIDSOFT_CLIENT_ID: !!VALIDSOFT_CLIENT_ID,
+        VALIDSOFT_CLIENT_SECRET: !!VALIDSOFT_CLIENT_SECRET,
+      },
     }), {
       status: 503,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   }
 
@@ -82,6 +105,7 @@ export default async (req) => {
       status: apiRes.status,
       headers: {
         'Content-Type': apiRes.headers.get('content-type') || 'application/json',
+        'Access-Control-Allow-Origin': '*',
       },
     });
   } catch (err) {
@@ -90,11 +114,12 @@ export default async (req) => {
       message: err.message,
     }), {
       status: 502,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   }
 };
 
 export const config = {
   path: '/validsoft/deepfake',
+  method: ['POST', 'OPTIONS'],
 };
