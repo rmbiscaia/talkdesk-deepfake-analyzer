@@ -143,7 +143,7 @@ class DeepfakeAnalyzer {
       const decoded = await audioCtx.decodeAudioData(arrayBuffer);
       audioCtx.close().catch(() => {});
 
-      const TARGET_RATE = 16000; // 16kHz — ValidSoft wideband requirement
+      const TARGET_RATE = 8000; // 8kHz — ValidSoft telephony requirement
       const srcRate = decoded.sampleRate;
       const duration = decoded.duration;
       const targetLength = Math.round(duration * TARGET_RATE);
