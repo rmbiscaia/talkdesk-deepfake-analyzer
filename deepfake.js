@@ -32,6 +32,7 @@ class DeepfakeAnalyzer {
     this.retryBtn = document.getElementById('retryBtn');
 
     // DOM elements — Results
+    this.resultsAudioPlayer = document.getElementById('resultsAudioPlayer');
     this.gaugeScore = document.getElementById('gaugeScore');
     this.gaugeUnit = document.getElementById('gaugeUnit');
     this.gaugeFill = document.getElementById('gaugeFill');
@@ -48,6 +49,7 @@ class DeepfakeAnalyzer {
     // State
     this.currentFile = null;
     this.base64Data = null;
+    this.audioUrl = null;
     this.mediaRecorder = null;
     this.recordingChunks = [];
     this.recordingStartTime = null;
@@ -159,8 +161,9 @@ class DeepfakeAnalyzer {
     this.previewName.textContent = file.name;
     this.previewMeta.textContent = `${ext} — ${sizeStr}`;
 
-    const url = URL.createObjectURL(file);
-    this.audioPlayer.src = url;
+    if (this.audioUrl) URL.revokeObjectURL(this.audioUrl);
+    this.audioUrl = URL.createObjectURL(file);
+    this.audioPlayer.src = this.audioUrl;
     this.audioPlayer.onloadedmetadata = () => {
       const duration = this.audioPlayer.duration;
       if (duration && isFinite(duration)) {
@@ -338,10 +341,12 @@ class DeepfakeAnalyzer {
   async analyzeBase64(base64) {
     const payloadSize = base64.length;
     const payloadMB = (payloadSize / (1024 * 1024)).toFixed(1);
-    console.log(`[Deepfake] Sending ${payloadMB} MB payload to API`);
+    const jsonBody = JSON.stringify({ voiceData: base64 });
+    const jsonMB = (jsonBody.length / (1024 * 1024)).toFixed(1);
+    console.log(`[Deepfake] Sending ${jsonMB} MB JSON payload (${payloadMB} MB base64)`);
 
-    if (payloadSize > 45 * 1024 * 1024) {
-      throw new Error(`Audio too large (${payloadMB} MB). Max ~45 MB base64. Try a shorter recording.`);
+    if (jsonBody.length > 5.5 * 1024 * 1024) {
+      throw new Error(`Audio too large (${jsonMB} MB payload). Netlify has a 6 MB request limit. Try a shorter or lower-quality recording.`);
     }
 
     const controller = new AbortController();
@@ -351,13 +356,14 @@ class DeepfakeAnalyzer {
       const response = await fetch('/validsoft/deepfake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voiceData: base64 }),
+        body: jsonBody,
         signal: controller.signal
       });
 
       clearTimeout(timeout);
 
       const text = await response.text();
+      const fromProxy = response.headers.get('x-proxy') === 'deepfake-fn';
       let data;
       try {
         data = JSON.parse(text);
@@ -366,9 +372,15 @@ class DeepfakeAnalyzer {
       }
 
       if (!response.ok) {
-        const msg = data.message || data.error || data.type || `HTTP ${response.status}`;
-        const detail = data.type ? `${data.type}: ${msg}` : msg;
-        throw new Error(detail);
+        console.error(`[Deepfake] HTTP ${response.status} (from ${fromProxy ? 'proxy' : 'Netlify infra'}):`, text.slice(0, 500));
+
+        if (!fromProxy) {
+          // 400 from Netlify infrastructure, not our function
+          throw new Error(`Netlify returned HTTP ${response.status} before reaching the proxy function. This usually means the request body is too large (${jsonMB} MB; limit ~6 MB) or the function path is misconfigured.`);
+        }
+
+        const msg = data.message || data.error || data.type || text.slice(0, 200) || `HTTP ${response.status}`;
+        throw new Error(`HTTP ${response.status}: ${msg}`);
       }
 
       return data;
@@ -378,7 +390,7 @@ class DeepfakeAnalyzer {
       if (err.name === 'AbortError') {
         throw new Error('Request timed out. The server may be unreachable or the audio too large.');
       }
-      throw new Error(`Could not reach the analysis server (${err.message}). Check that the server is running on ${window.location.origin} and try again.`);
+      throw err;
     }
   }
 
@@ -388,6 +400,14 @@ class DeepfakeAnalyzer {
 
   showResults(data) {
     this.setState('results');
+
+    // Set audio player in results section
+    if (this.audioUrl) {
+      this.resultsAudioPlayer.src = this.audioUrl;
+      this.resultsAudioPlayer.parentElement.hidden = false;
+    } else {
+      this.resultsAudioPlayer.parentElement.hidden = true;
+    }
 
     const score = this.extractScore(data);
     const classification = this.extractClassification(data, score);
@@ -648,6 +668,11 @@ class DeepfakeAnalyzer {
     this.base64Data = null;
     this.fileInput.value = '';
     this.audioPlayer.src = '';
+    this.resultsAudioPlayer.src = '';
+    if (this.audioUrl) {
+      URL.revokeObjectURL(this.audioUrl);
+      this.audioUrl = null;
+    }
     this.setState('idle');
   }
 

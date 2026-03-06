@@ -81,9 +81,28 @@ export default async (req) => {
     });
   }
 
+  const CORS = {
+    'Access-Control-Allow-Origin': '*',
+    'X-Proxy': 'deepfake-fn',  // proves response came from our function, not Netlify infra
+  };
+
   try {
     const body = await req.text();
+    const bodySizeKB = Math.round(body.length / 1024);
+    console.log(`[deepfake-fn] Received ${bodySizeKB} KB body`);
+
+    if (!body || body.length === 0) {
+      return new Response(JSON.stringify({
+        error: 'Empty request body',
+        message: 'No body received. The request may have been truncated by Netlify (6 MB limit).',
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', ...CORS },
+      });
+    }
+
     const token = await getToken();
+    console.log(`[deepfake-fn] Token acquired, forwarding to ValidSoft...`);
 
     const apiRes = await fetch(VALIDSOFT_API_URL, {
       method: 'POST',
@@ -95,6 +114,7 @@ export default async (req) => {
     });
 
     const responseBody = await apiRes.text();
+    console.log(`[deepfake-fn] ValidSoft responded: ${apiRes.status} (${responseBody.length} bytes)`);
 
     // Invalidate token cache on 401
     if (apiRes.status === 401) {
@@ -105,16 +125,17 @@ export default async (req) => {
       status: apiRes.status,
       headers: {
         'Content-Type': apiRes.headers.get('content-type') || 'application/json',
-        'Access-Control-Allow-Origin': '*',
+        ...CORS,
       },
     });
   } catch (err) {
+    console.error(`[deepfake-fn] Error: ${err.message}`);
     return new Response(JSON.stringify({
       error: 'ValidSoft proxy error',
       message: err.message,
     }), {
       status: 502,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      headers: { 'Content-Type': 'application/json', ...CORS },
     });
   }
 };

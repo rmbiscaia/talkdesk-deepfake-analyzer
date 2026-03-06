@@ -719,6 +719,28 @@ body {
   max-width: 400px;
 }
 
+/* Results Audio Playback */
+.df-results-audio {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.df-results-audio-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-400);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.df-results-audio audio {
+  width: 100%;
+  height: 36px;
+  border-radius: var(--radius-sm);
+}
+
 /* Details Grid */
 .df-details-grid {
   display: grid;
