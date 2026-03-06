@@ -118,17 +118,12 @@ body {
 .td-nav-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
   text-decoration: none;
-  color: white;
 }
 
-.td-nav-logo span {
-  font-family: 'Poppins', 'Inter', sans-serif;
-  font-weight: 700;
-  font-size: 18px;
-  color: white;
-  letter-spacing: -0.3px;
+.td-nav-logo-svg {
+  height: 22px;
+  width: auto;
 }
 
 .td-nav-divider {
@@ -977,7 +972,7 @@ body {
     padding: 0 16px;
   }
 
-  .td-nav-logo svg { height: 20px; }
+  .td-nav-logo-svg { height: 18px; }
   .td-nav-title { display: none; }
   .td-nav-divider { display: none; }
 

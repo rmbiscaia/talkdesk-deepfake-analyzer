@@ -2,6 +2,12 @@
 // Handles audio upload, microphone recording, base64 encoding, API calls, and result display
 
 class DeepfakeAnalyzer {
+  // Target sample rate for ValidSoft API. Override via URL param: ?rate=16000
+  static TARGET_RATE = (() => {
+    const param = new URLSearchParams(window.location.search).get('rate');
+    return param ? parseInt(param, 10) : 8000;
+  })();
+
   constructor() {
     // DOM elements — Input
     this.dropzone = document.getElementById('dropzone');
@@ -50,8 +56,9 @@ class DeepfakeAnalyzer {
     this.currentFile = null;
     this.base64Data = null;
     this.audioUrl = null;
-    this.mediaRecorder = null;
-    this.recordingChunks = [];
+    this.pcmSamples = [];
+    this.scriptProcessorNode = null;
+    this.mediaStream = null;
     this.recordingStartTime = null;
     this.recordingTimer = null;
     this.analyserNode = null;
@@ -143,7 +150,7 @@ class DeepfakeAnalyzer {
       const decoded = await audioCtx.decodeAudioData(arrayBuffer);
       audioCtx.close().catch(() => {});
 
-      const TARGET_RATE = 8000; // 8kHz — ValidSoft telephony requirement
+      const TARGET_RATE = DeepfakeAnalyzer.TARGET_RATE;
       const srcRate = decoded.sampleRate;
       const duration = decoded.duration;
       const targetLength = Math.round(duration * TARGET_RATE);
@@ -249,37 +256,42 @@ class DeepfakeAnalyzer {
   async startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.mediaStream = stream;
 
-      // Audio context for waveform visualization
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const TARGET_RATE = DeepfakeAnalyzer.TARGET_RATE;
+
+      // Create AudioContext at target sample rate — browser resamples
+      // from native mic rate (e.g. 48kHz) using high-quality HW resampling
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: TARGET_RATE
+      });
+
+      if (this.audioContext.sampleRate !== TARGET_RATE) {
+        console.warn(`[Deepfake] AudioContext sampleRate is ${this.audioContext.sampleRate}, requested ${TARGET_RATE}`);
+      }
+
       const source = this.audioContext.createMediaStreamSource(stream);
+
+      // AnalyserNode for waveform visualization
       this.analyserNode = this.audioContext.createAnalyser();
       this.analyserNode.fftSize = 256;
       source.connect(this.analyserNode);
 
-      // MediaRecorder
-      this.mediaRecorder = new MediaRecorder(stream, {
-        mimeType: this.getSupportedMimeType()
-      });
-      this.recordingChunks = [];
+      // ScriptProcessorNode for raw PCM capture (mono, 4096 buffer)
+      this.scriptProcessorNode = this.audioContext.createScriptProcessor(4096, 1, 1);
+      this.pcmSamples = [];
 
-      this.mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) this.recordingChunks.push(e.data);
+      this.scriptProcessorNode.onaudioprocess = (e) => {
+        // Copy input buffer — it's reused by the audio system
+        this.pcmSamples.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        // Silence the output to prevent feedback
+        e.outputBuffer.getChannelData(0).fill(0);
       };
 
-      this.mediaRecorder.onstop = () => {
-        stream.getTracks().forEach(t => t.stop());
-        if (this.recordingChunks.length > 0) {
-          const blob = new Blob(this.recordingChunks, { type: this.mediaRecorder.mimeType });
-          const ext = this.mediaRecorder.mimeType.includes('webm') ? 'webm' :
-                      this.mediaRecorder.mimeType.includes('mp4') ? 'm4a' : 'ogg';
-          const file = new File([blob], `recording-${Date.now()}.${ext}`, { type: blob.type });
-          this.loadFile(file);
-        }
-        this.cleanupRecording();
-      };
+      // Must connect to destination for onaudioprocess to fire
+      source.connect(this.scriptProcessorNode);
+      this.scriptProcessorNode.connect(this.audioContext.destination);
 
-      this.mediaRecorder.start(100);
       this.recordingStartTime = Date.now();
 
       // Show recorder UI
@@ -292,30 +304,64 @@ class DeepfakeAnalyzer {
       // Start waveform
       this.drawWaveform();
 
+      console.log(`[Deepfake] Recording started: raw PCM at ${this.audioContext.sampleRate}Hz mono`);
+
     } catch (err) {
       console.error('Microphone access denied:', err);
       this.showError('Microphone access denied', 'Please allow microphone access in your browser settings to record audio.');
     }
   }
 
-  getSupportedMimeType() {
-    const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) return type;
-    }
-    return 'audio/webm';
-  }
-
   stopRecording() {
-    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-      this.mediaRecorder.stop();
+    if (!this.audioContext || this.pcmSamples.length === 0) return;
+
+    const actualRate = this.audioContext.sampleRate;
+
+    // Concatenate all PCM chunks into a single Float32Array
+    const totalLength = this.pcmSamples.reduce((sum, c) => sum + c.length, 0);
+    const allSamples = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of this.pcmSamples) {
+      allSamples.set(chunk, offset);
+      offset += chunk.length;
     }
+
+    const duration = totalLength / actualRate;
+    console.log(`[Deepfake] Recording stopped: ${duration.toFixed(1)}s, ${totalLength} samples at ${actualRate}Hz`);
+
+    if (duration < 0.5) {
+      this.showError('Recording too short', 'Please record at least 1 second of audio.');
+      if (this.mediaStream) this.mediaStream.getTracks().forEach(t => t.stop());
+      this.cleanupRecording();
+      this.dropzone.hidden = false;
+      this.recorder.hidden = true;
+      return;
+    }
+
+    // Encode raw PCM directly as 16-bit WAV — zero lossy compression
+    const wavBytes = this.encodeWav(allSamples, actualRate);
+    const wavBase64 = this.arrayBufferToBase64(wavBytes);
+
+    this.base64Data = wavBase64;
+    console.log(`[Deepfake] Raw PCM WAV: ${(wavBytes.byteLength / 1024).toFixed(0)} KB, base64: ${(wavBase64.length / 1024).toFixed(0)} KB`);
+
+    // Create File for preview player
+    const wavBlob = new Blob([wavBytes], { type: 'audio/wav' });
+    const file = new File([wavBlob], `recording-${Date.now()}.wav`, { type: 'audio/wav' });
+    this.currentFile = file;
+
+    // Show preview (skip encodeFile — already at correct rate)
+    this.showPreview(file);
+
+    // Stop media stream + cleanup
+    if (this.mediaStream) this.mediaStream.getTracks().forEach(t => t.stop());
+    this.cleanupRecording();
   }
 
   cancelRecording() {
-    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-      this.recordingChunks = [];
-      this.mediaRecorder.stop();
+    this.pcmSamples = [];
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(t => t.stop());
     }
     this.cleanupRecording();
     this.dropzone.hidden = false;
@@ -327,11 +373,18 @@ class DeepfakeAnalyzer {
       clearInterval(this.recordingTimer);
       this.recordingTimer = null;
     }
+    if (this.scriptProcessorNode) {
+      this.scriptProcessorNode.onaudioprocess = null;
+      this.scriptProcessorNode.disconnect();
+      this.scriptProcessorNode = null;
+    }
     if (this.audioContext) {
       this.audioContext.close().catch(() => {});
       this.audioContext = null;
     }
     this.analyserNode = null;
+    this.mediaStream = null;
+    this.pcmSamples = [];
   }
 
   updateRecordingTime() {
