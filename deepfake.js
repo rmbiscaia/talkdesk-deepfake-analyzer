@@ -135,21 +135,85 @@ class DeepfakeAnalyzer {
     this.encodeFile(file);
   }
 
-  encodeFile(file) {
-    const reader = new FileReader();
+  async encodeFile(file) {
+    try {
+      // Read file as ArrayBuffer, decode audio, resample to 16kHz mono WAV
+      const arrayBuffer = await file.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+      audioCtx.close().catch(() => {});
 
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      const base64 = dataUrl.split(',')[1];
-      this.base64Data = base64;
+      const TARGET_RATE = 16000; // 16kHz — ValidSoft wideband requirement
+      const srcRate = decoded.sampleRate;
+      const duration = decoded.duration;
+      const targetLength = Math.round(duration * TARGET_RATE);
+
+      console.log(`[Deepfake] Resampling: ${srcRate}Hz → ${TARGET_RATE}Hz, ${duration.toFixed(1)}s, ${decoded.numberOfChannels}ch`);
+
+      // Mix to mono and resample via OfflineAudioContext
+      const offline = new OfflineAudioContext(1, targetLength, TARGET_RATE);
+      const source = offline.createBufferSource();
+      source.buffer = decoded;
+      source.connect(offline.destination);
+      source.start(0);
+      const rendered = await offline.startRendering();
+
+      // Encode as 16-bit PCM WAV
+      const wavBytes = this.encodeWav(rendered.getChannelData(0), TARGET_RATE);
+      const wavBase64 = this.arrayBufferToBase64(wavBytes);
+
+      this.base64Data = wavBase64;
+      console.log(`[Deepfake] Resampled WAV: ${(wavBytes.byteLength / 1024).toFixed(0)} KB base64: ${(wavBase64.length / 1024).toFixed(0)} KB`);
+
       this.showPreview(file);
-    };
+    } catch (err) {
+      console.error('[Deepfake] Audio processing error:', err);
+      this.showError('Failed to process audio', `Could not decode or resample the audio file: ${err.message}`);
+    }
+  }
 
-    reader.onerror = () => {
-      this.showError('Failed to read file', 'Could not read the audio file. Please try again.');
-    };
+  encodeWav(samples, sampleRate) {
+    const numSamples = samples.length;
+    const bytesPerSample = 2; // 16-bit
+    const dataSize = numSamples * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
 
-    reader.readAsDataURL(file);
+    // WAV header
+    const writeStr = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);           // fmt chunk size
+    view.setUint16(20, 1, true);            // PCM format
+    view.setUint16(22, 1, true);            // mono
+    view.setUint32(24, sampleRate, true);   // sample rate
+    view.setUint32(28, sampleRate * bytesPerSample, true); // byte rate
+    view.setUint16(32, bytesPerSample, true); // block align
+    view.setUint16(34, 16, true);           // bits per sample
+    writeStr(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    // PCM samples — clamp float32 [-1,1] → int16
+    let offset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+
+    return buffer;
+  }
+
+  arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
   }
 
   showPreview(file) {
