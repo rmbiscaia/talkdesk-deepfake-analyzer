@@ -658,7 +658,8 @@ class DeepfakeAnalyzer {
     if (Array.isArray(data.pluginScores)) {
       for (const plugin of data.pluginScores) {
         if (plugin.option === 'replay-detection') continue;
-        const name = plugin.option
+        const PLUGIN_LABELS = { 'get-snr': 'Speech Signal' };
+        const name = PLUGIN_LABELS[plugin.option] || plugin.option
           .replace(/-/g, ' ')
           .replace(/\b\w/g, c => c.toUpperCase());
 
