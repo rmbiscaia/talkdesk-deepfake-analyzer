@@ -610,8 +610,17 @@ class DeepfakeAnalyzer {
       switch (data.reason) {
         case 'SYNTHETIC-VOICE':
           return { type: 'deepfake', label: 'Deepfake Detected', description: `Synthetic voice detected.${pct} This audio shows characteristics of AI-generated speech.` };
-        case 'REPLAY-DETECTION':
-          return { type: 'deepfake', label: 'Replay Detected', description: `Audio replay attack detected.${pct}` };
+        case 'REPLAY-DETECTION': {
+          // Ignore replay detection — treat as genuine if synthetic-voice passed
+          const synthPlugin = Array.isArray(data.pluginScores)
+            ? data.pluginScores.find(p => p.option === 'synthetic-voice')
+            : null;
+          if (!synthPlugin || synthPlugin.passed) {
+            const pctG = score !== null ? ` (${(score * 100).toFixed(1)}% confidence)` : '';
+            return { type: 'genuine', label: 'Genuine', description: `All relevant checks passed${pctG} — this audio appears to be genuine human speech.` };
+          }
+          return { type: 'deepfake', label: 'Deepfake Detected', description: `Synthetic voice detected.${pct} This audio shows characteristics of AI-generated speech.` };
+        }
         case 'DETECT-SPEECH':
           return { type: 'unknown', label: 'No Speech', description: 'Insufficient speech detected in the audio. Try a longer sample with clear speech.' };
         case 'GET-SNR':
@@ -637,16 +646,18 @@ class DeepfakeAnalyzer {
     const details = [];
 
     // ValidSoft API: structured response with outcome, reason, pluginScores
+    const ignoreReplay = data.reason === 'REPLAY-DETECTION';
     if (data.outcome) {
-      details.push({ label: 'Outcome', value: data.outcome });
+      details.push({ label: 'Outcome', value: ignoreReplay ? 'PASSED' : data.outcome });
     }
-    if (data.reason) {
+    if (data.reason && !ignoreReplay) {
       details.push({ label: 'Reason', value: data.reason });
     }
 
-    // Plugin scores — show each analysis module with descriptions
+    // Plugin scores — show each analysis module with descriptions (skip replay-detection)
     if (Array.isArray(data.pluginScores)) {
       for (const plugin of data.pluginScores) {
+        if (plugin.option === 'replay-detection') continue;
         const name = plugin.option
           .replace(/-/g, ' ')
           .replace(/\b\w/g, c => c.toUpperCase());
@@ -706,10 +717,6 @@ class DeepfakeAnalyzer {
         return passed
           ? `The audio does not appear to be AI-generated — it sounds like a real human voice.${context}`
           : `The audio shows characteristics of AI-generated or synthesized speech.${context}`;
-      case 'replay-detection':
-        return passed
-          ? `The audio appears to be live speech, not played back from a recording.${context}`
-          : `The audio may have been played through a speaker and re-captured rather than being live speech.${context}`;
       case 'detect-speech':
         return passed
           ? `Sufficient speech content was detected in the audio.${context}`
@@ -726,26 +733,23 @@ class DeepfakeAnalyzer {
   generateSummary(data) {
     if (!Array.isArray(data.pluginScores) || !data.outcome) return '';
 
-    const total = data.pluginScores.length;
-    const passedCount = data.pluginScores.filter(p => p.passed).length;
+    // Exclude replay-detection from counts
+    const relevant = data.pluginScores.filter(p => p.option !== 'replay-detection');
+    const total = relevant.length;
+    const passedCount = relevant.filter(p => p.passed).length;
     const countStr = `${passedCount} of ${total} checks passed.`;
 
-    if (data.outcome === 'PASSED') {
+    if (data.outcome === 'PASSED' || data.reason === 'REPLAY-DETECTION') {
+      // Treat replay-detection failures as genuine
       return `The audio passed all ${total} checks. It appears to be genuine live human speech with good audio quality. ${countStr}`;
     }
 
     const synth = data.pluginScores.find(p => p.option === 'synthetic-voice');
-    const replay = data.pluginScores.find(p => p.option === 'replay-detection');
 
     switch (data.reason) {
       case 'SYNTHETIC-VOICE': {
         const scoreInfo = synth ? ` The synthetic voice score of ${(synth.score * 100).toFixed(0)}% fell below the ${(synth.threshold * 100).toFixed(0)}% threshold needed to pass.` : '';
         return `The audio was flagged as AI-generated speech.${scoreInfo} ${countStr}`;
-      }
-      case 'REPLAY-DETECTION': {
-        const replayInfo = replay ? ` The replay detection score of ${replay.score.toFixed(2)} fell below the ${replay.threshold} threshold.` : '';
-        const synthPassed = synth?.passed ? ' The voice itself sounds human (not AI-generated),' : '';
-        return `The audio was flagged as a replay attack —${synthPassed} but the system suspects it was played through a speaker rather than spoken live.${replayInfo} This could be a false positive depending on recording conditions. ${countStr}`;
       }
       case 'DETECT-SPEECH':
         return `The audio did not contain enough speech for reliable analysis. Try a longer recording with clear speech. ${countStr}`;
