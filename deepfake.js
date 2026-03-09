@@ -44,6 +44,7 @@ class DeepfakeAnalyzer {
     this.gaugeFill = document.getElementById('gaugeFill');
     this.classificationBadge = document.getElementById('classificationBadge');
     this.classificationDesc = document.getElementById('classificationDesc');
+    this.resultsSummary = document.getElementById('resultsSummary');
     this.detailsGrid = document.getElementById('detailsGrid');
     this.rawJson = document.getElementById('rawJson');
     this.newAnalysisBtn = document.getElementById('newAnalysisBtn');
@@ -538,14 +539,33 @@ class DeepfakeAnalyzer {
     this.classificationBadge.className = `df-classification-badge df-classification-badge--${classification.type}`;
     this.classificationDesc.textContent = classification.description;
 
+    // Update summary
+    const summary = this.generateSummary(data);
+    if (summary) {
+      this.resultsSummary.textContent = summary;
+      this.resultsSummary.hidden = false;
+    } else {
+      this.resultsSummary.hidden = true;
+    }
+
     // Update details grid
     this.detailsGrid.innerHTML = '';
     for (const detail of details) {
       const card = document.createElement('div');
       card.className = 'df-detail-card';
+      const statusDot = typeof detail.passed === 'boolean'
+        ? `<span class="df-detail-status df-detail-status--${detail.passed ? 'passed' : 'failed'}"></span>`
+        : '';
+      const descHtml = detail.description
+        ? `<div class="df-detail-desc">${detail.description}</div>`
+        : '';
       card.innerHTML = `
         <div class="df-detail-label">${detail.label}</div>
-        <div class="df-detail-value">${detail.value}</div>
+        <div class="df-detail-header">
+          <div class="df-detail-value">${detail.value}</div>
+          ${statusDot}
+        </div>
+        ${descHtml}
       `;
       this.detailsGrid.appendChild(card);
     }
@@ -624,7 +644,7 @@ class DeepfakeAnalyzer {
       details.push({ label: 'Reason', value: data.reason });
     }
 
-    // Plugin scores — show each analysis module
+    // Plugin scores — show each analysis module with descriptions
     if (Array.isArray(data.pluginScores)) {
       for (const plugin of data.pluginScores) {
         const name = plugin.option
@@ -639,9 +659,11 @@ class DeepfakeAnalyzer {
           value = String(plugin.score % 1 === 0 ? plugin.score : plugin.score.toFixed(2));
         }
         if (typeof plugin.threshold === 'number') {
-          value += ` (thr: ${plugin.threshold})`;
+          value += ` (threshold: ${plugin.threshold})`;
         }
-        details.push({ label: name, value });
+
+        const description = this.getPluginDescription(plugin);
+        details.push({ label: name, value, description, passed: plugin.passed });
       }
     }
 
@@ -669,6 +691,71 @@ class DeepfakeAnalyzer {
     }
 
     return details;
+  }
+
+  getPluginDescription(plugin) {
+    const passed = plugin.passed;
+    const scoreStr = typeof plugin.score === 'number'
+      ? (plugin.score % 1 === 0 ? String(plugin.score) : plugin.score.toFixed(2))
+      : null;
+    const thrStr = typeof plugin.threshold === 'number' ? String(plugin.threshold) : null;
+    const context = scoreStr && thrStr ? ` Score: ${scoreStr}, threshold: ${thrStr}.` : '';
+
+    switch (plugin.option) {
+      case 'synthetic-voice':
+        return passed
+          ? `The audio does not appear to be AI-generated — it sounds like a real human voice.${context}`
+          : `The audio shows characteristics of AI-generated or synthesized speech.${context}`;
+      case 'replay-detection':
+        return passed
+          ? `The audio appears to be live speech, not played back from a recording.${context}`
+          : `The audio may have been played through a speaker and re-captured rather than being live speech.${context}`;
+      case 'detect-speech':
+        return passed
+          ? `Sufficient speech content was detected in the audio.${context}`
+          : `Insufficient speech detected — try a longer sample with clear speech.${context}`;
+      case 'get-snr':
+        return passed
+          ? `Audio quality is good — speech signal is well above background noise.${context}`
+          : `Audio quality is too low for reliable analysis — try a cleaner recording environment.${context}`;
+      default:
+        return passed ? `Check passed.${context}` : `Check failed.${context}`;
+    }
+  }
+
+  generateSummary(data) {
+    if (!Array.isArray(data.pluginScores) || !data.outcome) return '';
+
+    const total = data.pluginScores.length;
+    const passedCount = data.pluginScores.filter(p => p.passed).length;
+    const countStr = `${passedCount} of ${total} checks passed.`;
+
+    if (data.outcome === 'PASSED') {
+      return `The audio passed all ${total} checks. It appears to be genuine live human speech with good audio quality. ${countStr}`;
+    }
+
+    const synth = data.pluginScores.find(p => p.option === 'synthetic-voice');
+    const replay = data.pluginScores.find(p => p.option === 'replay-detection');
+
+    switch (data.reason) {
+      case 'SYNTHETIC-VOICE': {
+        const scoreInfo = synth ? ` The synthetic voice score of ${(synth.score * 100).toFixed(0)}% fell below the ${(synth.threshold * 100).toFixed(0)}% threshold needed to pass.` : '';
+        return `The audio was flagged as AI-generated speech.${scoreInfo} ${countStr}`;
+      }
+      case 'REPLAY-DETECTION': {
+        const replayInfo = replay ? ` The replay detection score of ${replay.score.toFixed(2)} fell below the ${replay.threshold} threshold.` : '';
+        const synthPassed = synth?.passed ? ' The voice itself sounds human (not AI-generated),' : '';
+        return `The audio was flagged as a replay attack —${synthPassed} but the system suspects it was played through a speaker rather than spoken live.${replayInfo} This could be a false positive depending on recording conditions. ${countStr}`;
+      }
+      case 'DETECT-SPEECH':
+        return `The audio did not contain enough speech for reliable analysis. Try a longer recording with clear speech. ${countStr}`;
+      case 'GET-SNR':
+        return `The audio quality was too low for reliable analysis. The signal-to-noise ratio did not meet the minimum threshold. Try recording in a quieter environment. ${countStr}`;
+      case 'AUDIO-PROCESSING-FAILURE':
+        return `The audio could not be processed by the analysis engine. Try a different audio format or a longer sample. ${countStr}`;
+      default:
+        return `Analysis failed: ${data.reason}. ${countStr}`;
+    }
   }
 
   animateGauge(score, classification) {

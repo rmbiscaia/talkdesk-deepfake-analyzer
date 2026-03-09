@@ -736,10 +736,19 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/* Summary */
+.df-results-summary {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--gray-500);
+  max-width: 520px;
+  text-align: center;
+}
+
 /* Details Grid */
 .df-details-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   width: 100%;
 }
@@ -760,11 +769,34 @@ body {
   margin-bottom: 2px;
 }
 
+.df-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .df-detail-value {
   font-size: 14px;
   font-weight: 600;
   color: var(--gray-800);
   word-break: break-all;
+}
+
+.df-detail-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.df-detail-status--passed { background: var(--green-500); }
+.df-detail-status--failed { background: var(--red-500); }
+
+.df-detail-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--gray-400);
+  margin-top: 4px;
 }
 
 /* Raw JSON */
