@@ -463,8 +463,8 @@ class DeepfakeAnalyzer {
     const jsonMB = (jsonBody.length / (1024 * 1024)).toFixed(1);
     console.log(`[Deepfake] Sending ${jsonMB} MB JSON payload (${payloadMB} MB base64)`);
 
-    if (jsonBody.length > 5.5 * 1024 * 1024) {
-      throw new Error(`Audio too large (${jsonMB} MB payload). Netlify has a 6 MB request limit. Try a shorter or lower-quality recording.`);
+    if (jsonBody.length > 4 * 1024 * 1024) {
+      throw new Error(`Audio too large (${jsonMB} MB payload). Server has a ~4.5 MB request limit. Try a shorter or lower-quality recording.`);
     }
 
     const controller = new AbortController();
